@@ -31,6 +31,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Always deploy the CURRENT tip of main, not the SHA that triggered
+          # this run. When update-data.yml calls us, the data.json commit it
+          # just pushed is newer than the triggering SHA — checking out the
+          # trigger would deploy the previous snapshot.
+          ref: main
 
       - name: Stage site
         run: |

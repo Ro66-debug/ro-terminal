@@ -107,22 +107,25 @@ function toRow(t) {
 }
 
 // CoinGecko relay — the same Bybit USDT perps, but fewer fields: no
-// high/low/bid/ask, USD-only volume, and funding quoted in percent.
+// high/low/bid/ask, and funding quoted in percent. CoinGecko has two ticker
+// shapes: /derivatives uses price/price_percentage_change_24h/volume_24h,
+// while /derivatives/exchanges/{id} uses last/h24_percentage_change/
+// converted_volume.usd — accept either.
 function fromCoinGecko(t) {
   const funding = num(t.funding_rate);
   return {
     symbol: t.symbol,
-    last: num(t.price),
+    last: num(t.price ?? t.last),
     mark: null,
     index: num(t.index),
     prev24h: null,
-    change24hPct: num(t.price_percentage_change_24h),
+    change24hPct: num(t.price_percentage_change_24h ?? t.h24_percentage_change),
     high24h: null,
     low24h: null,
-    volume24h: null,
-    turnover24h: num(t.volume_24h),
+    volume24h: num(t.h24_volume),
+    turnover24h: num(t.volume_24h ?? t.converted_volume?.usd),
     openInterest: null,
-    openInterestValue: num(t.open_interest),
+    openInterestValue: num(t.open_interest ?? t.open_interest_usd),
     fundingRate: funding === null ? null : funding / 100,
     nextFundingTime: null,
     bid: null,
