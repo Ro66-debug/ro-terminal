@@ -14,12 +14,16 @@ on:
   # only way a data commit reaches Pages.
   workflow_call:
 
-# Branch-based Pages deploy: we force-push the built site to `gh-pages` and
-# GitHub's own "pages build and deployment" picks it up from there. We do NOT
-# use actions/deploy-pages because creating a Pages site through the API needs
-# repo-admin rights that GITHUB_TOKEN does not have; pushing a branch does not.
+# Two deploy paths, because GITHUB_TOKEN cannot CREATE a Pages site and we
+# cannot know from in here which source the repo's Pages settings use:
+#  - gh-pages branch push  → picked up when Pages source is "Deploy from a branch"
+#  - actions/deploy-pages  → picked up when Pages source is "GitHub Actions"
+# Each step tolerates the other's configuration, so whichever one matches the
+# settings wins and the other is a no-op.
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 # Never run two Pages deployments at once, and never cancel one midway.
 concurrency:
@@ -29,6 +33,9 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,7 +55,7 @@ jobs:
           ls -la _site
           echo "data.json generatedAt: $(node -p "require('./data.json').generatedAt")"
 
-      - name: Push to gh-pages
+      - name: Push to gh-pages (used when Pages source is a branch)
         run: |
           set -euo pipefail
           cd _site
@@ -64,8 +71,34 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # Official Actions deployment — works once the Pages site exists with
+      # source "GitHub Actions". Site creation needs admin rights GITHUB_TOKEN
+      # lacks, hence enablement stays off and errors are tolerated.
+      - uses: actions/configure-pages@v5
+        id: pages
+        continue-on-error: true
+        with:
+          enablement: false
+
+      - uses: actions/upload-pages-artifact@v3
+        continue-on-error: true
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
       - name: Report
         run: |
+          set -uo pipefail
           owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           repo="${GITHUB_REPOSITORY#*/}"
-          echo "Pushed gh-pages. Site (once Pages is enabled for the gh-pages branch): https://${owner}.github.io/${repo}/" >> "$GITHUB_STEP_SUMMARY"
+          url="https://${owner}.github.io/${repo}/"
+          {
+            echo "### Pages deploy"
+            echo ""
+            echo "- gh-pages branch: pushed"
+            echo "- actions deployment: ${{ steps.deployment.outcome }}"
+            echo "- expected URL: ${url}"
+          } >> "$GITHUB_STEP_SUMMARY"
