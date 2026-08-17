@@ -77,7 +77,7 @@ script and the browser.
 | Workflow | Trigger | Does |
 | --- | --- | --- |
 | `update-data.yml` | `*/5 * * * *`, manual, push to `main` touching the script | Fetch Bybit → commit `data.json` → call `pages.yml` |
-| `pages.yml` | push to `main`, manual, `workflow_call` | Stage `index.html` + `data.json` into `_site/`, deploy to Pages |
+| `pages.yml` | push to `main`, manual, `workflow_call` | Stage `index.html` + `data.json` and force-push them to the `gh-pages` branch; GitHub's built-in "pages build and deployment" publishes from there |
 | `e2e.yml` | every push, manual, `workflow_call` | `local` job = stubbed suite; `live` job = suite against the deployed URL |
 
 Three things worth knowing about the cron:
@@ -90,6 +90,18 @@ Three things worth knowing about the cron:
 - **A `GITHUB_TOKEN` push does not trigger other workflows.** That is why `update-data.yml`
   calls `pages.yml` through `workflow_call` instead of relying on the push trigger. Without
   it, `data.json` would update in the repo and never reach the site.
+
+Two deployment/geo constraints discovered the hard way:
+
+- **Pages deploys from the `gh-pages` branch, not `actions/deploy-pages`.** Creating a
+  Pages site through the REST API needs repo-admin rights that the Actions `GITHUB_TOKEN`
+  does not have (`configure-pages` fails with "Resource not accessible by integration").
+  Force-pushing a `gh-pages` branch needs only `contents: write`. Pages must be pointed at
+  `gh-pages` once in Settings → Pages if GitHub does not auto-enable it on branch creation.
+- **`api.bybit.com` 403s GitHub-hosted runners** (US geo-block). `scripts/fetch-bybit.js`
+  walks Bybit's alternate REST domains (`api.bytick.com`, `api.bybit.nl`, `api.byhkbit.com`,
+  `api.bybit-tr.com`, `api.bybit.kz`) until one answers. If Bybit closes all of them to US
+  IPs one day, the updater needs a non-US self-hosted runner or a proxy.
 
 ### Build volume
 

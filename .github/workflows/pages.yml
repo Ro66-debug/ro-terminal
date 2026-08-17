@@ -14,10 +14,12 @@ on:
   # only way a data commit reaches Pages.
   workflow_call:
 
+# Branch-based Pages deploy: we force-push the built site to `gh-pages` and
+# GitHub's own "pages build and deployment" picks it up from there. We do NOT
+# use actions/deploy-pages because creating a Pages site through the API needs
+# repo-admin rights that GITHUB_TOKEN does not have; pushing a branch does not.
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 # Never run two Pages deployments at once, and never cancel one midway.
 concurrency:
@@ -27,17 +29,8 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-        with:
-          # Creates the Pages site on first run if it does not exist yet.
-          enablement: true
 
       - name: Stage site
         run: |
@@ -49,12 +42,24 @@ jobs:
           ls -la _site
           echo "data.json generatedAt: $(node -p "require('./data.json').generatedAt")"
 
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: _site
+      - name: Push to gh-pages
+        run: |
+          set -euo pipefail
+          cd _site
+          git init -b gh-pages
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "deploy: ${GITHUB_SHA} $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # Single-commit branch, force-pushed — no history accumulation.
+          git push --force \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: deployment
-        uses: actions/deploy-pages@v4
-
-      - name: Report URL
-        run: echo "Deployed to ${{ steps.deployment.outputs.page_url }}" >> "$GITHUB_STEP_SUMMARY"
+      - name: Report
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          repo="${GITHUB_REPOSITORY#*/}"
+          echo "Pushed gh-pages. Site (once Pages is enabled for the gh-pages branch): https://${owner}.github.io/${repo}/" >> "$GITHUB_STEP_SUMMARY"

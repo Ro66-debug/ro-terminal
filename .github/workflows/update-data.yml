@@ -14,8 +14,6 @@ on:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 concurrency:
   group: update-data
@@ -78,7 +76,5 @@ jobs:
     needs: fetch
     if: needs.fetch.outputs.changed == 'true'
     permissions:
-      contents: read
-      pages: write
-      id-token: write
+      contents: write
     uses: ./.github/workflows/pages.yml

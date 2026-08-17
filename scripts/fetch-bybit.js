@@ -12,7 +12,17 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 
-const TICKERS_URL = 'https://api.bybit.com/v5/market/tickers?category=linear';
+// api.bybit.com geo-blocks some regions (it 403s GitHub's US-based runners),
+// so we walk Bybit's alternate REST domains until one answers.
+const HOSTS = [
+  'api.bybit.com',
+  'api.bytick.com',
+  'api.bybit.nl',
+  'api.byhkbit.com',
+  'api.bybit-tr.com',
+  'api.bybit.kz',
+];
+const TICKERS_PATH = '/v5/market/tickers?category=linear';
 const OUT_FILE = path.join(__dirname, '..', 'data.json');
 const SCHEMA_VERSION = 1;
 
@@ -28,33 +38,41 @@ function num(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-async function fetchWithRetry(url, attempts = 4) {
+async function fetchOnce(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { accept: 'application/json', 'user-agent': 'ro-terminal/0.2' },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    const body = await res.json();
+    if (body.retCode !== 0) {
+      throw new Error(`Bybit retCode ${body.retCode}: ${body.retMsg}`);
+    }
+    return body;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchWithRetry(attempts = 3) {
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 20000);
+    for (const host of HOSTS) {
       try {
-        const res = await fetch(url, {
-          signal: controller.signal,
-          headers: { accept: 'application/json', 'user-agent': 'ro-terminal/0.2' },
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-        const body = await res.json();
-        if (body.retCode !== 0) {
-          throw new Error(`Bybit retCode ${body.retCode}: ${body.retMsg}`);
-        }
+        const body = await fetchOnce(`https://${host}${TICKERS_PATH}`);
+        console.log(`fetched from ${host}`);
         return body;
-      } finally {
-        clearTimeout(timer);
+      } catch (err) {
+        lastError = err;
+        console.error(`attempt ${attempt}/${attempts} via ${host} failed: ${err.message}`);
       }
-    } catch (err) {
-      lastError = err;
-      console.error(`attempt ${attempt}/${attempts} failed: ${err.message}`);
-      if (attempt < attempts) {
-        const backoff = 2000 * 2 ** (attempt - 1);
-        await new Promise((resolve) => setTimeout(resolve, backoff));
-      }
+    }
+    if (attempt < attempts) {
+      const backoff = 2000 * 2 ** (attempt - 1);
+      await new Promise((resolve) => setTimeout(resolve, backoff));
     }
   }
   throw lastError;
@@ -85,7 +103,7 @@ function toRow(t) {
 }
 
 async function main() {
-  const body = await fetchWithRetry(TICKERS_URL);
+  const body = await fetchWithRetry();
   const list = Array.isArray(body?.result?.list) ? body.result.list : [];
 
   const tickers = list
