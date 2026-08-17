@@ -56,7 +56,7 @@ test.describe('Ro Terminal @ live URL', () => {
   });
 
   test('the page loads and renders live rows from data.json', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('./');
 
     await expect(page.getByTestId('app')).toBeVisible();
     // data.json must win the source chain on the deployed site.
@@ -72,7 +72,7 @@ test.describe('Ro Terminal @ live URL', () => {
   });
 
   test('BTCUSDT is on the board with a plausible price', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('./');
     await page.getByTestId('search').fill('BTCUSDT');
 
     const row = page.locator('[data-symbol="BTCUSDT"]');
@@ -96,7 +96,7 @@ test.describe('Ro Terminal @ live URL', () => {
       if (res.status() >= 400) problems.push(`http ${res.status()}: ${res.url()}`);
     });
 
-    await page.goto('/', { waitUntil: 'networkidle' });
+    await page.goto('./', { waitUntil: 'networkidle' });
     await expect(page.locator('[data-testid="row"]').first()).toBeVisible();
 
     expect(problems, problems.join('\n')).toEqual([]);
