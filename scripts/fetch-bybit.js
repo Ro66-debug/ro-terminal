@@ -23,6 +23,11 @@ const HOSTS = [
   'api.bybit.kz',
 ];
 const TICKERS_PATH = '/v5/market/tickers?category=linear';
+// Bybit 403s every one of its domains to US datacenter IPs — which is what
+// GitHub-hosted runners are. CoinGecko republishes Bybit's derivatives
+// tickers and is reachable from Actions, so it backstops the direct fetch.
+const COINGECKO_URL =
+  'https://api.coingecko.com/api/v3/derivatives/exchanges/bybit?include_tickers=unexpired';
 const OUT_FILE = path.join(__dirname, '..', 'data.json');
 const SCHEMA_VERSION = 1;
 
@@ -38,7 +43,7 @@ function num(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-async function fetchOnce(url) {
+async function fetchOnce(url, { bybit = true } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
   try {
@@ -48,7 +53,7 @@ async function fetchOnce(url) {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
     const body = await res.json();
-    if (body.retCode !== 0) {
+    if (bybit && body.retCode !== 0) {
       throw new Error(`Bybit retCode ${body.retCode}: ${body.retMsg}`);
     }
     return body;
@@ -57,7 +62,7 @@ async function fetchOnce(url) {
   }
 }
 
-async function fetchWithRetry(attempts = 3) {
+async function fetchBybitDirect(attempts = 2) {
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     for (const host of HOSTS) {
@@ -71,8 +76,7 @@ async function fetchWithRetry(attempts = 3) {
       }
     }
     if (attempt < attempts) {
-      const backoff = 2000 * 2 ** (attempt - 1);
-      await new Promise((resolve) => setTimeout(resolve, backoff));
+      await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
     }
   }
   throw lastError;
@@ -102,24 +106,79 @@ function toRow(t) {
   };
 }
 
-async function main() {
-  const body = await fetchWithRetry();
-  const list = Array.isArray(body?.result?.list) ? body.result.list : [];
+// CoinGecko relay — the same Bybit USDT perps, but fewer fields: no
+// high/low/bid/ask, USD-only volume, and funding quoted in percent.
+function fromCoinGecko(t) {
+  const funding = num(t.funding_rate);
+  return {
+    symbol: t.symbol,
+    last: num(t.price),
+    mark: null,
+    index: num(t.index),
+    prev24h: null,
+    change24hPct: num(t.price_percentage_change_24h),
+    high24h: null,
+    low24h: null,
+    volume24h: null,
+    turnover24h: num(t.volume_24h),
+    openInterest: null,
+    openInterestValue: num(t.open_interest),
+    fundingRate: funding === null ? null : funding / 100,
+    nextFundingTime: null,
+    bid: null,
+    ask: null,
+  };
+}
 
-  const tickers = list
-    .filter((t) => t?.symbol && isUsdtPerp(t.symbol))
-    .map(toRow)
-    // Deepest markets first — the terminal shows the top of this list.
-    .sort((a, b) => (b.turnover24h ?? 0) - (a.turnover24h ?? 0));
+async function fetchViaCoinGecko(attempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await fetchOnce(COINGECKO_URL, { bybit: false });
+    } catch (err) {
+      lastError = err;
+      console.error(`coingecko attempt ${attempt}/${attempts} failed: ${err.message}`);
+      if (attempt < attempts) {
+        await new Promise((resolve) => setTimeout(resolve, 5000 * attempt));
+      }
+    }
+  }
+  throw lastError;
+}
+
+async function main() {
+  let tickers;
+  let source;
+  let generatedAt;
+
+  try {
+    const body = await fetchBybitDirect();
+    const list = Array.isArray(body?.result?.list) ? body.result.list : [];
+    tickers = list.filter((t) => t?.symbol && isUsdtPerp(t.symbol)).map(toRow);
+    source = 'bybit';
+    generatedAt = new Date(Number(body.time) || Date.now()).toISOString();
+  } catch (err) {
+    console.error(`Bybit direct unavailable (${err.message}) — falling back to CoinGecko relay`);
+    const body = await fetchViaCoinGecko();
+    const list = Array.isArray(body?.tickers) ? body.tickers : [];
+    tickers = list
+      .filter((t) => t?.symbol && isUsdtPerp(t.symbol) && t.contract_type === 'perpetual')
+      .map(fromCoinGecko);
+    source = 'bybit-via-coingecko';
+    generatedAt = new Date().toISOString();
+  }
+
+  // Deepest markets first — the terminal shows the top of this list.
+  tickers.sort((a, b) => (b.turnover24h ?? 0) - (a.turnover24h ?? 0));
 
   if (tickers.length === 0) {
-    throw new Error('Bybit returned 0 USDT perpetuals — refusing to write an empty data.json');
+    throw new Error('0 USDT perpetuals returned — refusing to write an empty data.json');
   }
 
   const payload = {
     schemaVersion: SCHEMA_VERSION,
-    generatedAt: new Date(Number(body.time) || Date.now()).toISOString(),
-    source: 'bybit',
+    generatedAt,
+    source,
     category: 'linear',
     quote: 'USDT',
     count: tickers.length,
@@ -127,7 +186,7 @@ async function main() {
   };
 
   await fs.writeFile(OUT_FILE, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
-  console.log(`wrote ${OUT_FILE} — ${tickers.length} USDT perps at ${payload.generatedAt}`);
+  console.log(`wrote ${OUT_FILE} — ${tickers.length} USDT perps from ${source} at ${generatedAt}`);
 }
 
 main().catch((err) => {

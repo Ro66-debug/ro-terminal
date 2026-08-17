@@ -98,10 +98,17 @@ Two deployment/geo constraints discovered the hard way:
   does not have (`configure-pages` fails with "Resource not accessible by integration").
   Force-pushing a `gh-pages` branch needs only `contents: write`. Pages must be pointed at
   `gh-pages` once in Settings → Pages if GitHub does not auto-enable it on branch creation.
-- **`api.bybit.com` 403s GitHub-hosted runners** (US geo-block). `scripts/fetch-bybit.js`
-  walks Bybit's alternate REST domains (`api.bytick.com`, `api.bybit.nl`, `api.byhkbit.com`,
-  `api.bybit-tr.com`, `api.bybit.kz`) until one answers. If Bybit closes all of them to US
-  IPs one day, the updater needs a non-US self-hosted runner or a proxy.
+- **Bybit 403s GitHub-hosted runners on every domain** (US datacenter block — verified
+  against `api.bybit.com`, `api.bytick.com`, `api.bybit.nl`, `api.byhkbit.com`,
+  `api.bybit-tr.com` and `api.bybit.kz`). `scripts/fetch-bybit.js` still tries them all
+  first — from anywhere Bybit allows, you get the full-fidelity feed — then falls back to
+  **CoinGecko's Bybit derivatives relay**
+  (`/api/v3/derivatives/exchanges/bybit?include_tickers=unexpired`). Relay snapshots have
+  `source: "bybit-via-coingecko"` and carry nulls for fields CoinGecko does not republish
+  (`high24h`, `low24h`, `bid`, `ask`, `mark`, coin-denominated volume); the UI renders those
+  as `—`. CoinGecko quotes funding in percent — the script converts it back to a ratio so
+  `fundingRate` means the same thing from either source. A future fix with full fidelity
+  would be a self-hosted runner outside the US.
 
 ### Build volume
 

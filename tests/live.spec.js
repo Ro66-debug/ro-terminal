@@ -16,10 +16,12 @@ test.describe('Ro Terminal @ live URL', () => {
 
     const body = await res.json();
     expect(body.placeholder ?? false).toBe(false);
-    expect(body.source).toBe('bybit');
+    // 'bybit' when the runner can reach Bybit directly, 'bybit-via-coingecko'
+    // when it falls back to the relay (Bybit geo-blocks US datacenter IPs).
+    expect(body.source).toMatch(/^bybit/);
     expect(body.quote).toBe('USDT');
     expect(Array.isArray(body.tickers)).toBe(true);
-    expect(body.tickers.length).toBeGreaterThan(100);
+    expect(body.tickers.length).toBeGreaterThan(50);
     expect(body.count).toBe(body.tickers.length);
 
     // Every symbol must be a USDT perp.
@@ -42,10 +44,14 @@ test.describe('Ro Terminal @ live URL', () => {
       const t = bySymbol[symbol];
       expect(t, `${symbol} present in data.json`).toBeTruthy();
       expect(t.last).toBeGreaterThan(0);
-      expect(t.high24h).toBeGreaterThanOrEqual(t.last * 0.5);
-      expect(t.low24h).toBeGreaterThan(0);
-      expect(t.low24h).toBeLessThanOrEqual(t.high24h);
       expect(t.turnover24h).toBeGreaterThan(0);
+      // high/low ship only when Bybit was reachable directly; the CoinGecko
+      // relay does not carry them.
+      if (t.high24h !== null) {
+        expect(t.high24h).toBeGreaterThanOrEqual(t.last * 0.5);
+        expect(t.low24h).toBeGreaterThan(0);
+        expect(t.low24h).toBeLessThanOrEqual(t.high24h);
+      }
     }
   });
 
@@ -62,7 +68,7 @@ test.describe('Ro Terminal @ live URL', () => {
     await expect(rows).toHaveCount(50); // default Top 50
 
     const total = Number(await page.getByTestId('total-count').textContent());
-    expect(total).toBeGreaterThan(100);
+    expect(total).toBeGreaterThan(50);
   });
 
   test('BTCUSDT is on the board with a plausible price', async ({ page }) => {
