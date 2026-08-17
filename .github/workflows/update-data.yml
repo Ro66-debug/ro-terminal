@@ -1,0 +1,84 @@
+name: Update Bybit data
+
+on:
+  schedule:
+    # Every 5 minutes. GitHub only runs `schedule` on the DEFAULT branch, and
+    # under load it queues cron runs — treat 5 minutes as a floor, not a promise.
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/fetch-bybit.js'
+      - '.github/workflows/update-data.yml'
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: update-data
+  cancel-in-progress: true
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.commit.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Fetch Bybit USDT perpetuals
+        run: node scripts/fetch-bybit.js
+
+      - name: Commit data.json
+        id: commit
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- data.json; then
+            echo "data.json unchanged"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data.json
+          git commit -m "chore(data): Bybit USDT perps snapshot $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          # A concurrent run may have landed first; rebase onto it and retry.
+          for attempt in 1 2 3 4; do
+            if git push; then
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "push attempt $attempt failed, rebasing"
+            sleep $((2 ** attempt))
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+          done
+          echo "could not push data.json after 4 attempts" >&2
+          exit 1
+
+      - name: Summary
+        run: |
+          {
+            echo "### Bybit snapshot"
+            echo ""
+            echo "- symbols: $(node -p "require('./data.json').count")"
+            echo "- generatedAt: $(node -p "require('./data.json').generatedAt")"
+            echo "- committed: ${{ steps.commit.outputs.changed }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    needs: fetch
+    if: needs.fetch.outputs.changed == 'true'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml

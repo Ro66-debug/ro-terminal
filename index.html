@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ro Terminal — Bybit USDT Perpetuals</title>
+<meta name="description" content="Ro Terminal — live Bybit USDT perpetual futures board.">
+<style>
+  :root {
+    --bg: #07090c;
+    --panel: #0d1117;
+    --panel-2: #11171f;
+    --line: #1e2732;
+    --text: #d7e0ea;
+    --muted: #6f7f92;
+    --amber: #f0b429;
+    --up: #26d07c;
+    --down: #ff5c5c;
+    --accent: #4ea3ff;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px 16px;
+    padding: 10px 14px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    position: sticky;
+    top: 0;
+    z-index: 3;
+  }
+
+  .brand {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: .16em;
+    color: var(--amber);
+    text-transform: uppercase;
+  }
+
+  .brand .ver { color: var(--muted); font-weight: 400; letter-spacing: .05em; font-size: 11px; }
+
+  .statusbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    align-items: center;
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .statusbar b { color: var(--text); font-weight: 600; }
+
+  .dot {
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .dot.ok { background: var(--up); box-shadow: 0 0 6px var(--up); }
+  .dot.stale { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+  .dot.err { background: var(--down); box-shadow: 0 0 6px var(--down); }
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 14px;
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--line);
+  }
+
+  input[type="search"], select, button {
+    font: inherit;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 5px 8px;
+  }
+  input[type="search"] { min-width: 180px; }
+  input[type="search"]:focus, select:focus, button:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+  }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button[disabled] { opacity: .5; cursor: default; }
+
+  .tablewrap { overflow-x: auto; }
+
+  table { width: 100%; border-collapse: collapse; min-width: 900px; }
+
+  thead th {
+    position: sticky;
+    top: 0;
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    text-align: right;
+    padding: 7px 10px;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+  }
+  thead th:first-child { text-align: left; }
+  thead th:hover { color: var(--text); }
+  thead th[aria-sort="descending"]::after { content: " ▼"; color: var(--amber); }
+  thead th[aria-sort="ascending"]::after { content: " ▲"; color: var(--amber); }
+
+  tbody td {
+    padding: 5px 10px;
+    text-align: right;
+    border-bottom: 1px solid rgba(30, 39, 50, .55);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  tbody td:first-child { text-align: left; font-weight: 600; color: var(--text); }
+  tbody tr:hover { background: rgba(78, 163, 255, .07); }
+
+  .up { color: var(--up); }
+  .down { color: var(--down); }
+  .muted { color: var(--muted); }
+
+  .banner {
+    margin: 0;
+    padding: 9px 14px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .banner.err { background: rgba(255, 92, 92, .1); color: var(--down); }
+  .banner.warn { background: rgba(240, 180, 41, .1); color: var(--amber); }
+  .banner[hidden] { display: none; }
+
+  .empty { padding: 28px 14px; text-align: center; color: var(--muted); }
+
+  footer {
+    padding: 10px 14px 24px;
+    color: var(--muted);
+    font-size: 11px;
+    border-top: 1px solid var(--line);
+  }
+  footer a { color: var(--accent); }
+
+  @media (max-width: 640px) {
+    .statusbar { margin-left: 0; width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div id="app" data-testid="app">
+
+  <header>
+    <div class="brand">Ro Terminal <span class="ver">v0.2</span></div>
+    <div class="statusbar">
+      <span><span class="dot" id="status-dot" data-testid="status-dot"></span><b id="status-source" data-testid="status-source">loading…</b></span>
+      <span>updated <b id="status-age" data-testid="status-age">—</b></span>
+      <span><b id="row-count" data-testid="row-count">0</b> / <span id="total-count" data-testid="total-count">0</span> symbols</span>
+    </div>
+  </header>
+
+  <p class="banner err" id="error" data-testid="error" hidden></p>
+  <p class="banner warn" id="warning" data-testid="warning" hidden></p>
+
+  <div class="controls">
+    <input type="search" id="search" data-testid="search" placeholder="Filter symbol… (e.g. BTC)" autocomplete="off" spellcheck="false">
+    <select id="limit" data-testid="limit">
+      <option value="25">Top 25</option>
+      <option value="50" selected>Top 50</option>
+      <option value="100">Top 100</option>
+      <option value="0">All</option>
+    </select>
+    <button id="refresh" data-testid="refresh" type="button">Refresh</button>
+  </div>
+
+  <div class="tablewrap">
+    <table data-testid="ticker-table">
+      <thead>
+        <tr id="head-row">
+          <th data-key="symbol" scope="col">Symbol</th>
+          <th data-key="last" scope="col">Last</th>
+          <th data-key="change24hPct" scope="col">24h %</th>
+          <th data-key="high24h" scope="col">24h High</th>
+          <th data-key="low24h" scope="col">24h Low</th>
+          <th data-key="turnover24h" scope="col" aria-sort="descending">24h Turnover</th>
+          <th data-key="openInterestValue" scope="col">OI (USD)</th>
+          <th data-key="fundingRate" scope="col">Funding</th>
+        </tr>
+      </thead>
+      <tbody id="tbody" data-testid="tbody"></tbody>
+    </table>
+  </div>
+
+  <p class="empty" id="empty" data-testid="empty" hidden>No symbols match this filter.</p>
+
+  <footer>
+    Data: Bybit v5 public API (<code>category=linear</code>), USDT perpetuals only.
+    Refreshed into <code>data.json</code> every 5 minutes by GitHub Actions.
+    Informational only — not trading advice.
+  </footer>
+
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const REPO = { owner: 'Ro66-debug', name: 'ro-terminal', branch: 'main' };
+
+  // Source chain, tried in order. data.json (published next to this page) wins.
+  const SOURCES = [
+    { id: 'data.json', url: `./data.json?t=${Date.now()}`, kind: 'snapshot' },
+    {
+      id: 'raw:data.json',
+      url: `https://raw.githubusercontent.com/${REPO.owner}/${REPO.name}/${REPO.branch}/data.json`,
+      kind: 'snapshot',
+    },
+    { id: 'bybit-live', url: 'https://api.bybit.com/v5/market/tickers?category=linear', kind: 'live' },
+  ];
+
+  const STALE_AFTER_MS = 15 * 60 * 1000; // 3 missed cron runs
+  const AUTO_REFRESH_MS = 60 * 1000;
+
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    tbody: $('tbody'), search: $('search'), limit: $('limit'), refresh: $('refresh'),
+    error: $('error'), warning: $('warning'), empty: $('empty'),
+    statusSource: $('status-source'), statusAge: $('status-age'), statusDot: $('status-dot'),
+    rowCount: $('row-count'), totalCount: $('total-count'), headRow: $('head-row'),
+  };
+
+  const state = {
+    tickers: [],
+    source: null,
+    generatedAt: null,
+    sortKey: 'turnover24h',
+    sortDir: -1,
+    loading: false,
+    error: null,
+  };
+
+  // Exposed for Playwright assertions.
+  window.__roTerminal = { state, version: '0.2', reload };
+
+  const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+
+  function fmtPrice(v) {
+    if (!isNum(v)) return '—';
+    const abs = Math.abs(v);
+    const digits = abs >= 1000 ? 2 : abs >= 1 ? 3 : abs >= 0.01 ? 5 : 8;
+    return v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  }
+
+  function fmtCompact(v) {
+    if (!isNum(v)) return '—';
+    const abs = Math.abs(v);
+    if (abs >= 1e9) return `${(v / 1e9).toFixed(2)}B`;
+    if (abs >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
+    if (abs >= 1e3) return `${(v / 1e3).toFixed(2)}K`;
+    return v.toFixed(2);
+  }
+
+  function fmtPct(v, digits = 2) {
+    if (!isNum(v)) return '—';
+    return `${v >= 0 ? '+' : ''}${v.toFixed(digits)}%`;
+  }
+
+  function fmtAge(iso) {
+    if (!iso) return '—';
+    const then = Date.parse(iso);
+    if (!Number.isFinite(then)) return '—';
+    const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+    if (secs < 60) return `${secs}s ago`;
+    if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+    if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+    return `${Math.floor(secs / 86400)}d ago`;
+  }
+
+  const num = (v) => {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  // Normalise a raw Bybit ticker into the same shape data.json uses, so the
+  // renderer never has to care which source won.
+  function fromBybit(t) {
+    const pct = num(t.price24hPcnt);
+    return {
+      symbol: t.symbol,
+      last: num(t.lastPrice),
+      mark: num(t.markPrice),
+      change24hPct: pct === null ? null : pct * 100,
+      high24h: num(t.highPrice24h),
+      low24h: num(t.lowPrice24h),
+      volume24h: num(t.volume24h),
+      turnover24h: num(t.turnover24h),
+      openInterest: num(t.openInterest),
+      openInterestValue: num(t.openInterestValue),
+      fundingRate: num(t.fundingRate),
+      nextFundingTime: num(t.nextFundingTime),
+      bid: num(t.bid1Price),
+      ask: num(t.ask1Price),
+    };
+  }
+
+  const isUsdtPerp = (s) => typeof s === 'string' && s.endsWith('USDT') && !s.includes('-');
+
+  async function fetchJson(url, timeoutMs = 12000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { signal: controller.signal, cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function parseSnapshot(json) {
+    if (!json || !Array.isArray(json.tickers) || json.tickers.length === 0) return null;
+    return { tickers: json.tickers.filter((t) => isUsdtPerp(t?.symbol)), generatedAt: json.generatedAt || null };
+  }
+
+  function parseLive(json) {
+    const list = json?.result?.list;
+    if (!Array.isArray(list) || list.length === 0) return null;
+    const tickers = list.filter((t) => isUsdtPerp(t?.symbol)).map(fromBybit);
+    if (tickers.length === 0) return null;
+    return { tickers, generatedAt: new Date(Number(json.time) || Date.now()).toISOString() };
+  }
+
+  async function load() {
+    state.loading = true;
+    els.refresh.disabled = true;
+    const failures = [];
+
+    for (const src of SOURCES) {
+      try {
+        const url = src.id === 'data.json' ? `./data.json?t=${Date.now()}` : src.url;
+        const json = await fetchJson(url);
+        const parsed = src.kind === 'live' ? parseLive(json) : parseSnapshot(json);
+        if (!parsed) {
+          failures.push(`${src.id}: empty or placeholder`);
+          continue;
+        }
+        state.tickers = parsed.tickers;
+        state.generatedAt = parsed.generatedAt;
+        state.source = src.id;
+        state.error = null;
+        state.loading = false;
+        els.refresh.disabled = false;
+        render();
+        return;
+      } catch (err) {
+        failures.push(`${src.id}: ${err.message}`);
+      }
+    }
+
+    state.loading = false;
+    state.error = `All sources failed — ${failures.join('; ')}`;
+    els.refresh.disabled = false;
+    render();
+  }
+
+  function reload() { return load(); }
+
+  function visibleRows() {
+    const q = els.search.value.trim().toUpperCase();
+    let rows = q ? state.tickers.filter((t) => t.symbol.includes(q)) : state.tickers.slice();
+
+    const key = state.sortKey;
+    const dir = state.sortDir;
+    rows.sort((a, b) => {
+      const av = a[key];
+      const bv = b[key];
+      if (key === 'symbol') return dir * String(av).localeCompare(String(bv));
+      const an = isNum(av) ? av : -Infinity;
+      const bn = isNum(bv) ? bv : -Infinity;
+      return dir * (an - bn);
+    });
+
+    const limit = Number(els.limit.value) || 0;
+    return limit > 0 ? rows.slice(0, limit) : rows;
+  }
+
+  function render() {
+    // Status line
+    if (state.error) {
+      els.statusSource.textContent = 'offline';
+      els.statusDot.className = 'dot err';
+      els.error.textContent = state.error;
+      els.error.hidden = false;
+    } else {
+      els.statusSource.textContent = state.source || '—';
+      els.error.hidden = true;
+    }
+
+    els.statusAge.textContent = fmtAge(state.generatedAt);
+
+    const ageMs = state.generatedAt ? Date.now() - Date.parse(state.generatedAt) : Infinity;
+    if (!state.error) {
+      const stale = Number.isFinite(ageMs) && ageMs > STALE_AFTER_MS;
+      els.statusDot.className = stale ? 'dot stale' : 'dot ok';
+      if (stale && state.source !== 'bybit-live') {
+        els.warning.textContent = `Snapshot is ${fmtAge(state.generatedAt)} — the 5-minute updater may be behind.`;
+        els.warning.hidden = false;
+      } else {
+        els.warning.hidden = true;
+      }
+    }
+
+    // Header sort indicators
+    for (const th of els.headRow.querySelectorAll('th')) {
+      if (th.dataset.key === state.sortKey) {
+        th.setAttribute('aria-sort', state.sortDir === 1 ? 'ascending' : 'descending');
+      } else {
+        th.removeAttribute('aria-sort');
+      }
+    }
+
+    const rows = visibleRows();
+    els.totalCount.textContent = String(state.tickers.length);
+    els.rowCount.textContent = String(rows.length);
+
+    const frag = document.createDocumentFragment();
+    for (const t of rows) {
+      const tr = document.createElement('tr');
+      tr.dataset.testid = 'row';
+      tr.dataset.symbol = t.symbol;
+
+      const cells = [
+        [t.symbol, ''],
+        [fmtPrice(t.last), ''],
+        [fmtPct(t.change24hPct), isNum(t.change24hPct) ? (t.change24hPct >= 0 ? 'up' : 'down') : 'muted'],
+        [fmtPrice(t.high24h), ''],
+        [fmtPrice(t.low24h), ''],
+        [fmtCompact(t.turnover24h), ''],
+        [fmtCompact(t.openInterestValue), ''],
+        [
+          isNum(t.fundingRate) ? fmtPct(t.fundingRate * 100, 4) : '—',
+          isNum(t.fundingRate) ? (t.fundingRate >= 0 ? 'up' : 'down') : 'muted',
+        ],
+      ];
+
+      cells.forEach(([text, cls], i) => {
+        const td = document.createElement('td');
+        td.textContent = text;
+        if (cls) td.className = cls;
+        if (i === 0) td.dataset.testid = 'cell-symbol';
+        if (i === 1) td.dataset.testid = 'cell-last';
+        if (i === 2) td.dataset.testid = 'cell-change';
+        tr.appendChild(td);
+      });
+
+      frag.appendChild(tr);
+    }
+
+    els.tbody.replaceChildren(frag);
+    els.empty.hidden = rows.length > 0 || state.tickers.length === 0;
+    document.documentElement.dataset.ready = '1';
+  }
+
+  // Events
+  els.search.addEventListener('input', render);
+  els.limit.addEventListener('change', render);
+  els.refresh.addEventListener('click', load);
+
+  els.headRow.addEventListener('click', (e) => {
+    const th = e.target.closest('th[data-key]');
+    if (!th) return;
+    const key = th.dataset.key;
+    if (state.sortKey === key) {
+      state.sortDir = -state.sortDir;
+    } else {
+      state.sortKey = key;
+      state.sortDir = key === 'symbol' ? 1 : -1;
+    }
+    render();
+  });
+
+  setInterval(() => {
+    if (!state.loading) load();
+  }, AUTO_REFRESH_MS);
+  setInterval(() => { els.statusAge.textContent = fmtAge(state.generatedAt); }, 5000);
+
+  load();
+})();
+</script>
+</body>
+</html>

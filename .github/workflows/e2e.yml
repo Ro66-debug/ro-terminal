@@ -1,0 +1,104 @@
+name: E2E
+
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Deployed URL to test (blank = auto-detect the Pages URL)'
+        required: false
+        default: ''
+  workflow_call:
+    inputs:
+      base_url:
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  # Stubbed UI suite — deterministic, no external network, always runs.
+  local:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test tests/ui.spec.js
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report-local
+          path: playwright-report/
+          retention-days: 7
+
+  # Real assertions against the deployed GitHub Pages site.
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Resolve target URL
+        id: target
+        run: |
+          set -euo pipefail
+          url="${{ inputs.base_url }}"
+          if [ -z "$url" ]; then
+            owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+            repo="${GITHUB_REPOSITORY#*/}"
+            url="https://${owner}.github.io/${repo}/"
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Target: $url"
+
+      - name: Wait for the site to respond
+        id: probe
+        run: |
+          set -uo pipefail
+          url="${{ steps.target.outputs.url }}"
+          for attempt in $(seq 1 10); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' -L --max-time 20 "$url" || echo 000)
+            echo "attempt $attempt: HTTP $code"
+            if [ "$code" = "200" ]; then
+              echo "up=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "up=false" >> "$GITHUB_OUTPUT"
+          echo "::warning::$url did not return 200 — GitHub Pages is probably not deployed yet. LIVE SUITE DID NOT RUN."
+          {
+            echo "### Live suite SKIPPED"
+            echo ""
+            echo "\`$url\` never returned 200 (last status: $code)."
+            echo "Enable Pages (Settings → Pages → Source: GitHub Actions) and re-run."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if the site is unreachable
+        if: steps.probe.outputs.up != 'true'
+        run: |
+          echo "Deployed site unreachable — failing so this is not mistaken for a pass." >&2
+          exit 1
+
+      - run: npm install --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+
+      - name: Playwright against the live URL
+        env:
+          BASE_URL: ${{ steps.target.outputs.url }}
+        run: npx playwright test tests/live.spec.js
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report-live
+          path: playwright-report/
+          retention-days: 7
