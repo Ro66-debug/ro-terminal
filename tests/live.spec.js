@@ -61,7 +61,9 @@ test.describe('Ro Terminal @ live URL', () => {
     await expect(page.getByTestId('app')).toBeVisible();
     // data.json must win the source chain on the deployed site.
     await expect(page.getByTestId('status-source')).toHaveText('data.json');
-    await expect(page.getByTestId('status-dot')).toHaveClass(/ok/);
+    // ok, or stale when GitHub's cron queue is running behind — both healthy.
+    // Absolute freshness (< 90 min) is enforced by the data.json spec above.
+    await expect(page.getByTestId('status-dot')).toHaveClass(/ok|stale/);
     await expect(page.getByTestId('error')).toBeHidden();
 
     const rows = page.locator('[data-testid="row"]');
